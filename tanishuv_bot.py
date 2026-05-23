@@ -10,7 +10,7 @@ GROQ_API_KEY = "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"
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-REG_NAME, REG_AGE, REG_GENDER, REG_LOOKING, REG_CITY, REG_BIO, REG_PHOTO, SEND_MSG = range(8)
+REG_NAME, REG_AGE, REG_GENDER, REG_LOOKING, REG_CITY, REG_BIO, REG_PHOTO, SEND_MSG, AI_CHAT = range(9)
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -90,85 +90,66 @@ def get_ai_history(uid):
     con.close()
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
-def save_ai_message(uid, role, content):
+def save_ai_msg(uid, role, content):
     con = db()
     con.execute("INSERT INTO ai_history (user_id, role, content) VALUES (?,?,?)", (uid, role, content))
     con.commit()
     con.close()
 
-def clear_ai_history(uid):
+def clear_ai(uid):
     con = db()
     con.execute("DELETE FROM ai_history WHERE user_id=?", (uid,))
     con.commit()
     con.close()
 
-async def ask_ai(uid, user_message, user_name="Do'stim"):
-    save_ai_message(uid, "user", user_message)
+async def ask_ai(uid, text, name):
+    save_ai_msg(uid, "user", text)
     history = get_ai_history(uid)
-    messages = [
-        {
-            "role": "system",
-            "content": f"""Sen O'zbekiston tanishuv botining AI yordamchisisisan. Ismingiz TANISH AI.
-Vazifalaringiz:
-1. Foydalanuvchilar bilan do'stona suhbat qilish
-2. Tanishuv va munosabatlar bo'yicha maslahat berish
-3. Xabar yozishda yordam berish
-4. O'zbek tilida javob berish
-
-Foydalanuvchi ismi: {user_name}
-Doimo ijobiy, samimiy va qo'llab-quvvatlovchi bo'l."""
-        }
-    ] + history
     try:
-        response = groq_client.chat.completions.create(
+        res = groq_client.chat.completions.create(
             model="llama3-8b-8192",
-            messages=messages,
-            max_tokens=500,
-            temperature=0.7
+            messages=[{"role": "system", "content": f"Sen tanishuv boti AI yordamchisisisan. Foydalanuvchi ismi {name}. O'zbek tilida samimiy javob ber."}] + history,
+            max_tokens=500
         )
-        reply = response.choices[0].message.content
-        save_ai_message(uid, "assistant", reply)
+        reply = res.choices[0].message.content
+        save_ai_msg(uid, "assistant", reply)
         return reply
     except Exception as e:
-        return "❗ AI hozir band. Keyinroq urinib ko'ring."
+        log.error(f"AI xato: {e}")
+        return "❗ AI hozir band, keyinroq urinib ko'ring."
 
 def profile_text(u):
     g = "👨 Erkak" if u["gender"] == "erkak" else "👩 Ayol"
     l = {"erkak": "👨 Erkak", "ayol": "👩 Ayol", "farqi_yoq": "💫 Farqi yo'q"}.get(u["looking"], "")
     return f"✨ *{u['name']}*, {u['age']} yosh\n📍 {u['city']}\n👤 {g} | {l}\n\n💬 _{u['bio']}_"
 
-def browse_kb(cid):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("❤️ Like", callback_data=f"like:{cid}"), InlineKeyboardButton("👎 O'tkazish", callback_data=f"skip:{cid}")], [InlineKeyboardButton("💌 Xabar yoz", callback_data=f"msg:{cid}")], [InlineKeyboardButton("🏠 Menyu", callback_data="menu")]])
-
 def main_kb():
     return ReplyKeyboardMarkup([["🔍 Qidirish", "💕 Matchlarim"], ["👤 Profilim", "🤖 AI Maslahat"], ["⚙️ Sozlamalar"]], resize_keyboard=True)
 
-async def show_next(update, ctx, uid):
+def browse_kb(cid):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❤️ Like", callback_data=f"like:{cid}"), InlineKeyboardButton("👎 O'tkazish", callback_data=f"skip:{cid}")],
+        [InlineKeyboardButton("💌 Xabar yoz", callback_data=f"msg:{cid}")],
+        [InlineKeyboardButton("🏠 Menyu", callback_data="menu")]
+    ])
+
+async def show_next(msg_or_query, ctx, uid):
     c = get_candidate(uid)
-    con = db()
     if c:
+        con = db()
         con.execute("INSERT OR IGNORE INTO views VALUES (?,?)", (uid, c["id"]))
         con.commit()
-    con.close()
+        con.close()
+    send = msg_or_query if hasattr(msg_or_query, "reply_text") else msg_or_query.message
     if not c:
-        txt = "😔 Hozircha profil yo'q!"
-        if hasattr(update, "message") and update.message:
-            await update.message.reply_text(txt, reply_markup=main_kb())
-        else:
-            await update.edit_message_text(txt)
+        await send.reply_text("😔 Hozircha profil yo'q!", reply_markup=main_kb())
         return
-    kb = browse_kb(c["id"])
     txt = profile_text(c)
+    kb = browse_kb(c["id"])
     if c["photo_id"]:
-        if hasattr(update, "message") and update.message:
-            await update.message.reply_photo(c["photo_id"], caption=txt, parse_mode="Markdown", reply_markup=kb)
-        else:
-            await update.message.reply_photo(c["photo_id"], caption=txt, parse_mode="Markdown", reply_markup=kb)
+        await send.reply_photo(c["photo_id"], caption=txt, parse_mode="Markdown", reply_markup=kb)
     else:
-        if hasattr(update, "message") and update.message:
-            await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=kb)
-        else:
-            await update.edit_message_text(txt, parse_mode="Markdown", reply_markup=kb)
+        await send.reply_text(txt, parse_mode="Markdown", reply_markup=kb)
 
 async def start(update, ctx):
     uid = update.effective_user.id
@@ -177,7 +158,7 @@ async def start(update, ctx):
     if u and u["name"]:
         await update.message.reply_text(f"Xush kelibsiz, *{u['name']}*! 💕", parse_mode="Markdown", reply_markup=main_kb())
         return ConversationHandler.END
-    await update.message.reply_text("💕 *TANISHUV BOT*ga xush kelibsiz!\n\nIsmingizni yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("💕 *TANISHUV BOT*ga xush kelibsiz!\nIsmingizni yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     return REG_NAME
 
 async def reg_name(update, ctx):
@@ -186,7 +167,7 @@ async def reg_name(update, ctx):
         await update.message.reply_text("❗ Ism 2-30 belgi bo'lsin:")
         return REG_NAME
     ctx.user_data["reg"] = {"name": name}
-    await update.message.reply_text(f"Zo'r, *{name}*! Yoshingizni yozing:", parse_mode="Markdown")
+    await update.message.reply_text(f"Zo'r! Yoshingizni yozing:", parse_mode="Markdown")
     return REG_AGE
 
 async def reg_age(update, ctx):
@@ -194,7 +175,7 @@ async def reg_age(update, ctx):
         age = int(update.message.text.strip())
         assert 16 <= age <= 80
     except:
-        await update.message.reply_text("❗ Yoshingizni to'g'ri kiriting (16-80):")
+        await update.message.reply_text("❗ 16-80 orasida yozing:")
         return REG_AGE
     ctx.user_data["reg"]["age"] = age
     await update.message.reply_text("Jinsingiz?", reply_markup=ReplyKeyboardMarkup([["👨 Erkak", "👩 Ayol"]], resize_keyboard=True, one_time_keyboard=True))
@@ -248,43 +229,59 @@ async def reg_photo(update, ctx):
     uid = update.effective_user.id
     photo_id = update.message.photo[-1].file_id if update.message.photo else None
     reg = ctx.user_data.get("reg", {})
-    reg["photo_id"] = photo_id
     con = db()
-    con.execute("UPDATE users SET name=?, age=?, gender=?, looking=?, city=?, bio=?, photo_id=? WHERE id=?", (reg["name"], reg["age"], reg["gender"], reg["looking"], reg["city"], reg["bio"], reg["photo_id"], uid))
+    con.execute("UPDATE users SET name=?, age=?, gender=?, looking=?, city=?, bio=?, photo_id=? WHERE id=?", (reg["name"], reg["age"], reg["gender"], reg["looking"], reg["city"], reg["bio"], photo_id, uid))
     con.commit()
     con.close()
-    await update.message.reply_text("🎉 Profil tayyor! Qidiruvni boshlang!", reply_markup=main_kb())
+    await update.message.reply_text("🎉 Profil tayyor!", reply_markup=main_kb())
     return ConversationHandler.END
 
-async def ai_chat(update, ctx):
-    uid = update.effective_user.id
-    u = get_user(uid)
-    name = u["name"] if u and u["name"] else "Do'stim"
+async def ai_start(update, ctx):
     await update.message.reply_text(
-        "🤖 *TANISH AI* — Men sizning shaxsiy maslahatchi va suhbatdoshingizman!\n\n"
-        "Menga istalgan narsani so'rang:\n"
-        "• 💬 Oddiy suhbat\n"
-        "• 💕 Tanishuv maslahati\n"
-        "• ✍️ Xabar yozishda yordam\n\n"
-        "_Suhbatni tozalash uchun /ai_clear yozing_",
+        "🤖 *TANISH AI* ga xush kelibsiz!\nIstalgan narsani so'rang 💬\n\n_Chiqish: /menu_",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup([["🏠 Bosh menyu"]], resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup([["🏠 Bosh menyu", "🗑 Tarixni tozala"]], resize_keyboard=True)
     )
-    ctx.user_data["ai_mode"] = True
+    return AI_CHAT
 
-async def handle_ai_message(update, ctx):
+async def ai_message(update, ctx):
     uid = update.effective_user.id
+    txt = update.message.text
+    if txt == "🏠 Bosh menyu":
+        await update.message.reply_text("Bosh menyu:", reply_markup=main_kb())
+        return ConversationHandler.END
+    if txt == "🗑 Tarixni tozala":
+        clear_ai(uid)
+        await update.message.reply_text("✅ Tarix tozalandi!")
+        return AI_CHAT
     u = get_user(uid)
     name = u["name"] if u and u["name"] else "Do'stim"
     await update.message.reply_chat_action("typing")
-    reply = await ask_ai(uid, update.message.text, name)
+    reply = await ask_ai(uid, txt, name)
     await update.message.reply_text(f"🤖 {reply}")
+    return AI_CHAT
 
-async def ai_clear(update, ctx):
+async def send_msg_handler(update, ctx):
     uid = update.effective_user.id
-    clear_ai_history(uid)
-    await update.message.reply_text("✅ Suhbat tarixi tozalandi!", reply_markup=main_kb())
-    ctx.user_data["ai_mode"] = False
+    to = ctx.user_data.get("msg_to")
+    txt = update.message.text
+    if txt == "❌ Bekor" or not to:
+        ctx.user_data.pop("msg_to", None)
+        await update.message.reply_text("Bekor qilindi.", reply_markup=main_kb())
+        return ConversationHandler.END
+    me = get_user(uid)
+    try:
+        await ctx.bot.send_message(
+            to,
+            f"💌 *{me['name']}* dan xabar:\n\n{txt}",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Javob berish", callback_data=f"reply:{uid}")]])
+        )
+        await update.message.reply_text("✅ Xabar yuborildi!", reply_markup=main_kb())
+    except:
+        await update.message.reply_text("❗ Yuborib bo'lmadi.", reply_markup=main_kb())
+    ctx.user_data.pop("msg_to", None)
+    return ConversationHandler.END
 
 async def cb(update, ctx):
     q = update.callback_query
@@ -292,8 +289,9 @@ async def cb(update, ctx):
     uid = q.from_user.id
     data = q.data
     if data == "menu":
-        ctx.user_data["ai_mode"] = False
         await q.message.reply_text("Bosh menyu:", reply_markup=main_kb())
+        return
+    if ":" not in data:
         return
     action, cid_str = data.split(":", 1)
     cid = int(cid_str)
@@ -302,15 +300,16 @@ async def cb(update, ctx):
         if matched:
             other = get_user(cid)
             me = get_user(uid)
-            await q.message.reply_text(f"🎉 MATCH! *{other['name']}* ham sizni yoqtirdi!", parse_mode="Markdown", reply_markup=main_kb())
+            await q.message.reply_text(f"🎉 MATCH! *{other['name']}* ham sizni yoqtirdi! 💕", parse_mode="Markdown", reply_markup=main_kb())
             try:
-                await ctx.bot.send_message(cid, f"🎉 MATCH! *{me['name']}* ham sizni yoqtirdi!", parse_mode="Markdown")
+                await ctx.bot.send_message(cid, f"🎉 MATCH! *{me['name']}* ham sizni yoqtirdi! 💕", parse_mode="Markdown")
             except:
                 pass
-        await show_next(q, ctx, uid)
+        else:
+            await show_next(q.message, ctx, uid)
     elif action == "skip":
-        await show_next(q, ctx, uid)
-    elif action == "msg":
+        await show_next(q.message, ctx, uid)
+    elif action in ["msg", "reply"]:
         u1, u2 = sorted([uid, cid])
         con = db()
         match = con.execute("SELECT 1 FROM matches WHERE user1=? AND user2=?", (u1, u2)).fetchone()
@@ -320,28 +319,12 @@ async def cb(update, ctx):
             return
         ctx.user_data["msg_to"] = cid
         other = get_user(cid)
-        await q.message.reply_text(f"✍️ *{other['name']}* ga xabar yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+        await q.message.reply_text(
+            f"✍️ *{other['name']}* ga xabar yozing:",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup([["❌ Bekor"]], resize_keyboard=True)
+        )
         return SEND_MSG
-    elif action == "send_msg":
-        ctx.user_data["msg_to"] = cid
-        other = get_user(cid)
-        await q.message.reply_text(f"✍️ *{other['name']}* ga xabar yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
-        return SEND_MSG
-
-async def send_msg(update, ctx):
-    uid = update.effective_user.id
-    to = ctx.user_data.get("msg_to")
-    if not to:
-        await update.message.reply_text("❗ Xato.", reply_markup=main_kb())
-        return ConversationHandler.END
-    me = get_user(uid)
-    try:
-        await ctx.bot.send_message(to, f"💌 *{me['name']}* dan:\n\n{update.message.text}", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Javob", callback_data=f"send_msg:{uid}")]]))
-        await update.message.reply_text("✅ Yuborildi!", reply_markup=main_kb())
-    except:
-        await update.message.reply_text("❗ Xabar yuborib bo'lmadi.", reply_markup=main_kb())
-    ctx.user_data.pop("msg_to", None)
-    return ConversationHandler.END
 
 async def my_matches(update, ctx):
     uid = update.effective_user.id
@@ -370,7 +353,10 @@ async def my_profile(update, ctx):
         await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_kb())
 
 async def settings(update, ctx):
-    await update.message.reply_text("⚙️ Sozlamalar:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Yashirish", callback_data="deactivate")], [InlineKeyboardButton("✅ Ko'rsatish", callback_data="activate")]]))
+    await update.message.reply_text("⚙️ Sozlamalar:", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Profilni yashirish", callback_data="deactivate")],
+        [InlineKeyboardButton("✅ Profilni ko'rsatish", callback_data="activate")]
+    ]))
 
 async def settings_cb(update, ctx):
     q = update.callback_query
@@ -383,37 +369,10 @@ async def settings_cb(update, ctx):
         save_user(uid, {"active": 1})
         await q.edit_message_text("✅ Profil faollashtirildi!")
 
-async def text_router(update, ctx):
-    txt = update.message.text
-    if txt == "🏠 Bosh menyu":
-        ctx.user_data["ai_mode"] = False
-        await update.message.reply_text("Bosh menyu:", reply_markup=main_kb())
-        return
-    if txt == "🔍 Qidirish":
-        ctx.user_data["ai_mode"] = False
-        u = get_user(update.effective_user.id)
-        if not u or not u["name"]:
-            await update.message.reply_text("Avval /start bosing.")
-            return
-        await show_next(update, ctx, update.effective_user.id)
-    elif txt == "💕 Matchlarim":
-        ctx.user_data["ai_mode"] = False
-        await my_matches(update, ctx)
-    elif txt == "👤 Profilim":
-        ctx.user_data["ai_mode"] = False
-        await my_profile(update, ctx)
-    elif txt == "🤖 AI Maslahat":
-        await ai_chat(update, ctx)
-    elif txt == "⚙️ Sozlamalar":
-        ctx.user_data["ai_mode"] = False
-        await settings(update, ctx)
-    elif ctx.user_data.get("ai_mode"):
-        await handle_ai_message(update, ctx)
-    else:
-        await update.message.reply_text("Menyu tugmalaridan foydalaning 👇", reply_markup=main_kb())
+async def menu_cmd(update, ctx):
+    await update.message.reply_text("Bosh menyu:", reply_markup=main_kb())
 
 async def cancel(update, ctx):
-    ctx.user_data["ai_mode"] = False
     await update.message.reply_text("❌ Bekor qilindi.", reply_markup=main_kb())
     return ConversationHandler.END
 
@@ -427,9 +386,27 @@ async def stats(update, ctx):
     con.close()
     await update.message.reply_text(f"📊 Foydalanuvchilar: {u}\n❤️ Likelar: {l}\n💕 Matchlar: {m}")
 
+async def text_router(update, ctx):
+    txt = update.message.text
+    if txt == "🔍 Qidirish":
+        u = get_user(update.effective_user.id)
+        if not u or not u["name"]:
+            await update.message.reply_text("Avval /start bosing.")
+            return
+        await show_next(update.message, ctx, update.effective_user.id)
+    elif txt == "💕 Matchlarim":
+        await my_matches(update, ctx)
+    elif txt == "👤 Profilim":
+        await my_profile(update, ctx)
+    elif txt == "⚙️ Sozlamalar":
+        await settings(update, ctx)
+    else:
+        await update.message.reply_text("Menyu tugmalaridan foydalaning 👇", reply_markup=main_kb())
+
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
+
     reg = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -444,17 +421,30 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True,
     )
-    msg = ConversationHandler(
-        entry_points=[CallbackQueryHandler(cb, pattern="^send_msg:")],
-        states={SEND_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_msg)]},
+
+    ai_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🤖 AI Maslahat$"), ai_start)],
+        states={
+            AI_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ai_message)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("menu", menu_cmd)],
+    )
+
+    msg_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(cb, pattern="^(msg:|reply:)")],
+        states={
+            SEND_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_msg_handler)],
+        },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
     app.add_handler(reg)
-    app.add_handler(msg)
+    app.add_handler(ai_conv)
+    app.add_handler(msg_conv)
     app.add_handler(CallbackQueryHandler(settings_cb, pattern="^(deactivate|activate)$"))
     app.add_handler(CallbackQueryHandler(cb))
     app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("ai_clear", ai_clear))
+    app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     log.info("Bot ishga tushdi!")
