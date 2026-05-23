@@ -5,12 +5,15 @@ import os
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
+
 # Bot sozlamalari
 BOT_TOKEN = "8917321620:AAGHWTm0Q5mGQao_X9j34eAOne92_4IvznQ"
 ADMIN_ID = 2050916191
 DB = "tanishuv.db"
+
 # Conversation holatlari
 REG_NAME, REG_AGE, REG_GENDER, REG_LOOKING, REG_CITY, REG_BIO, REG_PHOTO, SEND_MSG = range(8)
+
 # Logging sozlash
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -28,8 +31,10 @@ def init_db():
         con.commit()
     finally:
         con.close()
+
 def db():
     return sqlite3.connect(DB)
+
 def get_user(uid):
     con = db()
     try:
@@ -39,6 +44,7 @@ def get_user(uid):
         return dict(zip(["id","name","age","gender","looking","city","bio","photo_id","active"], row))
     finally:
         con.close()
+
 def save_user(uid, data):
     con = db()
     try:
@@ -55,13 +61,16 @@ def create_user(uid):
         con.commit()
     finally:
         con.close()
+
 def get_candidate(uid):
     u = get_user(uid)
     if not u or not u["looking"]:
         return None
+    
     gf = ""
     if u["looking"] != "farqi_yoq":
         gf = f"AND gender='{u['looking']}'"
+        
     con = db()
     try:
         query = f"""
@@ -80,6 +89,7 @@ def get_candidate(uid):
         return dict(zip(["id","name","age","gender","looking","city","bio","photo_id","active"], row))
     finally:
         con.close()
+
 def add_like(from_id, to_id):
     con = db()
     try:
@@ -94,6 +104,7 @@ def add_like(from_id, to_id):
         return matched
     finally:
         con.close()
+
 def get_matches(uid):
     con = db()
     try:
@@ -106,18 +117,22 @@ def get_matches(uid):
         return rows
     finally:
         con.close()
+
 def profile_text(u):
     g = "👨 Erkak" if u["gender"] == "erkak" else "👩 Ayol"
     l = {"erkak": "👨 Erkak", "ayol": "👩 Ayol", "farqi_yoq": "💫 Farqi yo'q"}.get(u["looking"], "")
     return f"✨ *{u['name']}*, {u['age']} yosh\n📍 {u['city']}\n👤 {g} | {l}\n\n💬 _{u['bio']}_"
+
 def browse_kb(cid):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("❤️ Like", callback_data=f"like:{cid}"), InlineKeyboardButton("👎 O'tkazish", callback_data=f"skip:{cid}")],
         [InlineKeyboardButton("💌 Xabar yoz", callback_data=f"msg:{cid}")],
         [InlineKeyboardButton("🏠 Menyu", callback_data="menu")]
     ])
+
 def main_kb():
     return ReplyKeyboardMarkup([["🔍 Qidirish", "💕 Matchlarim"], ["👤 Profilim", "⚙️ Sozlamalar"]], resize_keyboard=True)
+
 async def show_next(update: Update, ctx: ContextTypes.DEFAULT_TYPE, uid: int):
     c = get_candidate(uid)
     if c:
@@ -127,20 +142,25 @@ async def show_next(update: Update, ctx: ContextTypes.DEFAULT_TYPE, uid: int):
             con.commit()
         finally:
             con.close()
+    
     if update.callback_query:
         chat_id = update.callback_query.message.chat_id
     else:
         chat_id = update.effective_chat.id
+
     if not c:
         txt = "😔 Hozircha yangi profil yo'q! Birozdan so'ng qayta urinib ko'ring."
         await ctx.bot.send_message(chat_id=chat_id, text=txt, reply_markup=main_kb())
         return
+
     kb = browse_kb(c["id"])
     txt = profile_text(c)
+    
     if c["photo_id"]:
         await ctx.bot.send_photo(chat_id=chat_id, photo=c["photo_id"], caption=txt, parse_mode="Markdown", reply_markup=kb)
     else:
         await ctx.bot.send_message(chat_id=chat_id, text=txt, parse_mode="Markdown", reply_markup=kb)
+
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     create_user(uid)
@@ -150,6 +170,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     await update.message.reply_text("💕 *TANISHUV BOT*ga xush kelibsiz!\n\nIsmingizni yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     return REG_NAME
+
 async def reg_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if len(name) < 2 or len(name) > 30:
@@ -168,6 +189,7 @@ async def reg_age(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["reg"]["age"] = age
     await update.message.reply_text("Jinsingiz?", reply_markup=ReplyKeyboardMarkup([["👨 Erkak", "👩 Ayol"]], resize_keyboard=True, one_time_keyboard=True))
     return REG_GENDER
+
 async def reg_gender(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if "Erkak" in txt:
@@ -179,6 +201,7 @@ async def reg_gender(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return REG_GENDER
     await update.message.reply_text("Kim bilan tanishmoqchisiz?", reply_markup=ReplyKeyboardMarkup([["👨 Erkak", "👩 Ayol"], ["💫 Farqi yo'q"]], resize_keyboard=True, one_time_keyboard=True))
     return REG_LOOKING
+
 async def reg_looking(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if "Erkak" in txt:
@@ -192,6 +215,7 @@ async def reg_looking(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return REG_LOOKING
     await update.message.reply_text("📍 Shahringizni yozing:", reply_markup=ReplyKeyboardRemove())
     return REG_CITY
+
 async def reg_city(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     city = update.message.text.strip()
     if len(city) < 2:
@@ -200,6 +224,7 @@ async def reg_city(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["reg"]["city"] = city
     await update.message.reply_text("💬 O'zingiz haqingizda yozing:")
     return REG_BIO
+
 async def reg_bio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     bio = update.message.text.strip()
     if len(bio) < 5:
@@ -208,9 +233,9 @@ async def reg_bio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["reg"]["bio"] = bio
     await update.message.reply_text("📸 Rasmingizni yuboring:", reply_markup=ReplyKeyboardMarkup([["⏭ O'tkazish"]], resize_keyboard=True, one_time_keyboard=True))
     return REG_PHOTO
+
 async def reg_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    
     if update.message.text == "⏭ O'tkazish":
         photo_id = None
     elif update.message.photo:
@@ -219,7 +244,6 @@ async def reg_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ Iltimos, rasm yuboring yoki 'O'tkazish' tugmasini bosing:")
         return REG_PHOTO
     reg = ctx.user_data.get("reg", {})
-    
     con = db()
     try:
         con.execute("""
@@ -233,6 +257,7 @@ async def reg_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎉 Profil tayyor! Qidiruvni boshlang!", reply_markup=main_kb())
     ctx.user_data.pop("reg", None)
     return ConversationHandler.END
+
 async def cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -240,7 +265,7 @@ async def cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = q.data
     if data == "menu":
         await ctx.bot.send_message(chat_id=q.message.chat_id, text="Bosh menyu:", reply_markup=main_kb())
-        return ConversationHandler.END       
+        return ConversationHandler.END
     action, cid_str = data.split(":", 1)
     cid = int(cid_str)
     if action == "like":
@@ -265,11 +290,12 @@ async def cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             con.close()
         if not match:
             await ctx.bot.send_message(chat_id=q.message.chat_id, text="❗ Avval o'zaro match bo'lishi kerak!")
-            return ConversationHandler.END       
+            return ConversationHandler.END
         ctx.user_data["msg_to"] = cid
         other = get_user(cid)
         await ctx.bot.send_message(chat_id=q.message.chat_id, text=f"✍️ *{other['name']}* ga xabar yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
         return SEND_MSG
+
 async def send_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     to = ctx.user_data.get("msg_to")
@@ -284,6 +310,7 @@ async def send_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ Xabar yuborib bo'lmadi.", reply_markup=main_kb())
     ctx.user_data.pop("msg_to", None)
     return ConversationHandler.END
+
 async def my_matches(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     matches = get_matches(uid)
@@ -297,6 +324,7 @@ async def my_matches(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text += f"• *{mname}*, {mage} yosh — {mcity}\n"
         btns.append([InlineKeyboardButton(f"💌 {mname}ga yoz", callback_data=f"msg:{mid}")])
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(btns))
+
 async def my_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     u = get_user(uid)
@@ -308,8 +336,10 @@ async def my_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(u["photo_id"], caption=txt, parse_mode="Markdown", reply_markup=main_kb())
     else:
         await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_kb())
+
 async def settings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⚙️ Sozlamalar:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Yashirish", callback_data="deactivate")], [InlineKeyboardButton("✅ Ko'rsatish", callback_data="activate")]]))
+
 async def settings_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -320,6 +350,7 @@ async def settings_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif q.data == "activate":
         save_user(uid, {"active": 1})
         await q.edit_message_text("✅ Profil faollashtirildi!")
+
 async def text_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     uid = update.effective_user.id
@@ -337,9 +368,11 @@ async def text_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await settings(update, ctx)
     else:
         await update.message.reply_text("Menyu tugmalaridan foydalaning 👇", reply_markup=main_kb())
+
 async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Bekor qilindi.", reply_markup=main_kb())
     return ConversationHandler.END
+
 async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -351,9 +384,11 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"📊 Foydalanuvchilar: {u}\n❤️ Likelar: {l}\n💕 Matchlar: {m}")
     finally:
         con.close()
+
 def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
+    
     reg = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -366,11 +401,15 @@ def main():
             REG_PHOTO: [MessageHandler(filters.PHOTO | filters.TEXT, reg_photo)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True, 
+        allow_reentry=True,
+    )
+    
     msg = ConversationHandler(
         entry_points=[CallbackQueryHandler(cb, pattern="^(msg:|send_msg:)")],
         states={SEND_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_msg)]},
         fallbacks=[CommandHandler("cancel", cancel), CallbackQueryHandler(cb, pattern="^menu$")],
+    )
+    
     app.add_handler(reg)
     app.add_handler(msg)
     app.add_handler(CallbackQueryHandler(settings_cb, pattern="^(deactivate|activate)$"))
@@ -378,7 +417,9 @@ def main():
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
+    
     log.info("Bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
+
 if __name__ == "__main__":
     main()
