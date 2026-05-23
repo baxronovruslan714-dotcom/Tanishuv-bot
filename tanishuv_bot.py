@@ -170,7 +170,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     await update.message.reply_text("💕 *TANISHUV BOT*ga xush kelibsiz!\n\nIsmingizni yozing:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     return REG_NAME
-
 async def reg_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if len(name) < 2 or len(name) > 30:
@@ -179,6 +178,7 @@ async def reg_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["reg"] = {"name": name}
     await update.message.reply_text(f"Zo'r, *{name}*! Yoshingizni yozing:", parse_mode="Markdown")
     return REG_AGE
+
 async def reg_age(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         age = int(update.message.text.strip())
